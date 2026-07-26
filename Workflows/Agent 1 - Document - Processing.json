@@ -1,0 +1,149 @@
+{
+  "name": "Agent 1 - Document - Processing",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ff19988e-d6ba-41ef-bc75-9755ff14fa1d",
+        "responseMode": "responseNode",
+        "options": {
+          "binaryPropertyName": "file"
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "65fd3751-0980-4cc8-9aeb-8d773afe25df",
+      "name": "Webhook",
+      "webhookId": "ff19988e-d6ba-41ef-bc75-9755ff14fa1d"
+    },
+    {
+      "parameters": {
+        "jsCode": "const binaryPropertyName = \"file0\";\nconst itemIndex = 0;\n\n// This correctly retrieves the actual file content whether n8n is storing it\n// in memory or on disk (which is what \"filesystem-v2\" was telling us).\nconst buffer = await this.helpers.getBinaryDataBuffer(itemIndex, binaryPropertyName);\nconst base64PDF = buffer.toString(\"base64\");\n\nreturn [{ json: { base64PDF: base64PDF } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "96a36336-662c-44bc-9c91-803a51496241",
+      "name": "Prepare PDF for Gemini"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n     \"contents\": [\n       {\n         \"parts\": [\n           {\n             \"text\": \"You are an invoice-processing assistant. Read the attached invoice PDF carefully and extract the following fields: vendor name, invoice number, date, line items (as a list of item descriptions, quantity,unit price, and amounts), tax amount, and total amount. Return ONLY a valid JSON object with these exact keys: vendor, invoice_number, date, line_items, tax, total. Do not include any explanation, markdown formatting, or extra text — return the raw JSON object only. If a field cannot be found, set its value to null.\"\n           },\n           {\n             \"inline_data\": {\n               \"mime_type\": \"application/pdf\",\n               \"data\": \"{{ $json.base64PDF }}\"\n             }\n           }\n         ]\n       }\n     ]\n   }",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        416,
+        0
+      ],
+      "id": "7a4f72ba-3370-4acb-823f-0ad4a28e7b7f",
+      "name": "Call Gemini API",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "1WqKDOOGfdAH0ypD",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Gemini's response nests the actual answer here:\nconst responseText = $input.first().json.candidates[0].content.parts[0].text;\n\n// Sometimes models wrap JSON in ```json ... ``` — strip that out just in case.\nlet cleanText = responseText.replace(/```json/g, \"\").replace(/```/g, \"\").trim();\n\nlet extractedData;\ntry {\n  extractedData = JSON.parse(cleanText);\n} catch (error) {\n  // If parsing fails, return the raw text so we can see what went wrong\n  // instead of the whole workflow silently breaking.\n  extractedData = {\n    error: \"Could not parse Gemini's response as JSON\",\n    raw_response: cleanText\n  };\n}\n\nreturn [{ json: extractedData }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        0
+      ],
+      "id": "84126d3d-2aeb-48f1-ab36-d90b8eccf0c4",
+      "name": "Parse Extracted Fields"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        832,
+        0
+      ],
+      "id": "a55d57b3-23d7-48f8-9cb7-739405441730",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Prepare PDF for Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare PDF for Gemini": {
+      "main": [
+        [
+          {
+            "node": "Call Gemini API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Gemini API": {
+      "main": [
+        [
+          {
+            "node": "Parse Extracted Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Extracted Fields": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "400dd5f3-c543-403b-bc1a-b1b0cb2814e9",
+  "meta": {
+    "instanceId": "eb9e2615b1c4695f2f40b89a0e9804d7b585e29c47ab8ea385d8ab84582dc8f6"
+  },
+  "nodeGroups": [],
+  "id": "kSR5R72RgzjqWhO4",
+  "tags": []
+}
