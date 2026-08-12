@@ -1,0 +1,372 @@
+{
+  "name": "Rohan AI AP Agent-FullWorkflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ff19988e-d6ba-41ef-bc75-9755ff14fa1d",
+        "responseMode": "responseNode",
+        "options": {
+          "binaryPropertyName": "file"
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "65fd3751-0980-4cc8-9aeb-8d773afe25df",
+      "name": "Webhook",
+      "webhookId": "ff19988e-d6ba-41ef-bc75-9755ff14fa1d"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1008,
+        224
+      ],
+      "id": "a55d57b3-23d7-48f8-9cb7-739405441730",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const binaryPropertyName = \"file0\";\nconst itemIndex = 0;\n\n// This correctly retrieves the actual file content whether n8n is storing it\n// in memory or on disk (which is what \"filesystem-v2\" was telling us).\nconst buffer = await this.helpers.getBinaryDataBuffer(itemIndex, binaryPropertyName);\nconst base64PDF = buffer.toString(\"base64\");\n\nreturn [{ json: { base64PDF: base64PDF } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "96a36336-662c-44bc-9c91-803a51496241",
+      "name": "A1: Prepare PDF for Gemini"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n     \"contents\": [\n       {\n         \"parts\": [\n           {\n             \"text\": \"You are an invoice-processing assistant. Read the attached invoice PDF carefully and extract the following fields: vendor name, invoice number, date, line items (as a list of item descriptions, quantity,unit price, and amounts), tax amount, and total amount. Return ONLY a valid JSON object with these exact keys: vendor, invoice_number, date, line_items, tax, total. Do not include any explanation, markdown formatting, or extra text — return the raw JSON object only. If a field cannot be found, set its value to null.\"\n           },\n           {\n             \"inline_data\": {\n               \"mime_type\": \"application/pdf\",\n               \"data\": \"{{ $json.base64PDF }}\"\n             }\n           }\n         ]\n       }\n     ]\n   }",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        416,
+        0
+      ],
+      "id": "7a4f72ba-3370-4acb-823f-0ad4a28e7b7f",
+      "name": "A1: Call Gemini API",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "1WqKDOOGfdAH0ypD",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Gemini's response nests the actual answer here:\nconst responseText = $input.first().json.candidates[0].content.parts[0].text;\n\n// Sometimes models wrap JSON in ```json ... ``` — strip that out just in case.\nlet cleanText = responseText.replace(/```json/g, \"\").replace(/```/g, \"\").trim();\n\nlet extractedData;\ntry {\n  extractedData = JSON.parse(cleanText);\n} catch (error) {\n  // If parsing fails, return the raw text so we can see what went wrong\n  // instead of the whole workflow silently breaking.\n  extractedData = {\n    error: \"Could not parse Gemini's response as JSON\",\n    raw_response: cleanText\n  };\n}\n\nreturn [{ json: extractedData }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        0
+      ],
+      "id": "84126d3d-2aeb-48f1-ab36-d90b8eccf0c4",
+      "name": "A1: Parse Extracted Fields"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n   const checks = [];\n   let hardFail = false;\n\n   // Check 1: Vendor name present\n   const vendorPresent = !!data.vendor;\n   checks.push({ name: \"Vendor name present\", passed: vendorPresent });\n   if (!vendorPresent) hardFail = true;\n\n   // Check 2: Invoice number present\n   const invoiceNumberPresent = !!data.invoice_number;\n   checks.push({ name: \"Invoice number present\", passed: invoiceNumberPresent });\n   if (!invoiceNumberPresent) hardFail = true;\n\n   // Check 3: Total is present and a valid positive number\n   const totalValid = data.total !== null && data.total !== undefined && data.total > 0;\n   checks.push({ name: \"Total is present and valid\", passed: totalValid });\n   if (!totalValid) hardFail = true;\n\n   // Check 4: Line item math reconciles with the total (within a small tolerance)\n   let mathValid = true;\n   if (Array.isArray(data.line_items) && data.line_items.length > 0) {\n     let lineItemSum = 0;\n     data.line_items.forEach((item) => {\n       const expected = (item.quantity || 0) * (item.unit_price || 0);\n       if (item.amount !== undefined && item.amount !== null && Math.abs(expected - item.amount) > 0.5) {\n         mathValid = false;\n       }\n       lineItemSum += item.amount || 0;\n     });\n     const expectedTotal = lineItemSum + (data.tax || 0);\n     if (Math.abs(expectedTotal - (data.total || 0)) > 1) {\n       mathValid = false;\n     }\n   } else {\n     mathValid = false; // no line items at all is itself a hard fail\n   }\n   checks.push({ name: \"Line item math reconciles with total\", passed: mathValid });\n   if (!mathValid) hardFail = true;\n\n   // Check 5: Not a duplicate of a known past invoice\n   // (Small hardcoded sample list standing in for a real database/Google Sheet —\n   //  see the README's disclosed-limitations section.)\n   const sampleLedger = [\n     { vendor: \"Acme Corp\", invoice_number: \"1001\" },\n     { vendor: \"Bright Office Supplies\", invoice_number: \"2044\" },\n     { vendor: \"Nova Consulting\", invoice_number: \"3312\" }\n   ];\n   const isDuplicate = sampleLedger.some(\n     (entry) => entry.vendor === data.vendor && entry.invoice_number === data.invoice_number\n   );\n   checks.push({ name: \"Not a duplicate of a known past invoice\", passed: !isDuplicate });\n   if (isDuplicate) hardFail = true;\n\n   return [{\n     json: {\n       ...data,\n       tier1_checks: checks,\n       tier1_passed: !hardFail\n     }\n   }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        848,
+        0
+      ],
+      "id": "9f36fd3f-d002-48dc-bfcf-d36607d1e880",
+      "name": "A2: Completeness Gate"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n   let score = 100;\n   let tier2_findings = [];\n\n   // Same small sample list from the Completeness Gate, reused here to check\n   // whether this vendor has appeared before.\n   const sampleLedger = [\n     { vendor: \"Acme Corp\", invoice_number: \"1001\" },\n     { vendor: \"Bright Office Supplies\", invoice_number: \"2044\" },\n     { vendor: \"Nova Consulting\", invoice_number: \"3312\" }\n   ];\n\n   // Signal 1: first-time vendor\n   const vendorSeenBefore = sampleLedger.some((entry) => entry.vendor === data.vendor);\n   if (!vendorSeenBefore) {\n     score -= 5;\n     tier2_findings.push(\"New vendor — not seen in past invoices\");\n   }\n\n   // Signal 2: suspiciously round total (a very mild anomaly signal, not a red flag on its own)\n   if (data.total && data.total % 100 === 0) {\n     score -= 5;\n     tier2_findings.push(\"Total is a suspiciously round number\");\n   }\n\n   // Signal 3: minor rounding drift, smaller than what Tier 1 already tolerated as a hard fail\n   let lineItemSum = 0;\n   if (Array.isArray(data.line_items)) {\n     data.line_items.forEach((item) => { lineItemSum += item.amount || 0; });\n   }\n   const expectedTotal = lineItemSum + (data.tax || 0);\n   const drift = Math.abs(expectedTotal - (data.total || 0));\n   if (drift > 0.01 && drift <= 1) {\n     score -= 3;\n     tier2_findings.push(\"Minor rounding difference between line items and total\");\n   }\n\n   // Signal 4: invoice date oddities\n   if (data.date) {\n     const invoiceDate = new Date(data.date);\n     const today = new Date();\n     const daysDiff = (today - invoiceDate) / (1000 * 60 * 60 * 24);\n     if (daysDiff < 0) {\n       score -= 5;\n       tier2_findings.push(\"Invoice date is in the future\");\n     } else if (daysDiff > 180) {\n       score -= 5;\n       tier2_findings.push(\"Invoice is older than 6 months\");\n     }\n   }\n\n   return [{\n     json: {\n       ...data,\n       confidence_score: score,\n       tier2_findings: tier2_findings\n     }\n   }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        176
+      ],
+      "id": "75d65346-c0ff-43fe-9e8b-c2b61335447f",
+      "name": "A3: Soft signal scoring"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "7f28b6f6-99ee-4143-bb22-8cafecceab2f",
+              "leftValue": "={{ $json.tier1_passed }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        0,
+        192
+      ],
+      "id": "defd5705-237b-4a53-b9fa-0ec109a8f8ec",
+      "name": "A2: Tier 1 Passed?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d4e622c7-2182-4b8d-a80c-db4f4f40d641",
+              "leftValue": "={{ $json.confidence_score }}",
+              "rightValue": 95,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        496,
+        176
+      ],
+      "id": "92ace346-b6a5-4d67-8d4a-a5c57d6abbfd",
+      "name": "A3: Route Decision "
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n   return [{ json: { ...data, decision: \"approved\" } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        752,
+        160
+      ],
+      "id": "30d3a76e-bb8b-4d6a-ac49-1dbf1dc63337",
+      "name": "A3: Mark Approved"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n   return [{ json: { ...data, decision: \"escalated_for_review\" } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        752,
+        320
+      ],
+      "id": "80b4c552-1109-4d17-b511-0bef7ad8c8f0",
+      "name": "A3: Mark Escalated"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n   return [{\n     json: {\n       ...data,\n       decision: \"rejected_needs_correction\",\n       confidence_score: null,\n       tier2_findings: []\n     }\n   }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        336
+      ],
+      "id": "c77a764a-e133-4c12-aef8-31c90a855a38",
+      "name": "A3: Mark Rejected"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "A1: Prepare PDF for Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A1: Prepare PDF for Gemini": {
+      "main": [
+        [
+          {
+            "node": "A1: Call Gemini API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A1: Call Gemini API": {
+      "main": [
+        [
+          {
+            "node": "A1: Parse Extracted Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A1: Parse Extracted Fields": {
+      "main": [
+        [
+          {
+            "node": "A2: Completeness Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A2: Completeness Gate": {
+      "main": [
+        [
+          {
+            "node": "A2: Tier 1 Passed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A3: Soft signal scoring": {
+      "main": [
+        [
+          {
+            "node": "A3: Route Decision ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A2: Tier 1 Passed?": {
+      "main": [
+        [
+          {
+            "node": "A3: Soft signal scoring",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "A3: Mark Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A3: Route Decision ": {
+      "main": [
+        [
+          {
+            "node": "A3: Mark Approved",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "A3: Mark Escalated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A3: Mark Approved": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A3: Mark Escalated": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A3: Mark Rejected": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "3f66e058-0796-4fe4-a289-7fbca93c986f",
+  "meta": {
+    "instanceId": "eb9e2615b1c4695f2f40b89a0e9804d7b585e29c47ab8ea385d8ab84582dc8f6"
+  },
+  "nodeGroups": [],
+  "id": "kSR5R72RgzjqWhO4",
+  "tags": []
+}
