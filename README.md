@@ -40,7 +40,7 @@ Three agents work in sequence:
 docs/Agent Architecture n8n.pdf
 
 
-The Problem:
+## The Problem
 Small and medium-sized businesses process invoices largely by hand: someone opens each PDF, reads the vendor and amount, checks it against what was actually ordered, and decides whether to pay it. This is slow, error-prone, and does not scale — a growing business either hires more people to do this same manual work, or starts making mistakes: paying duplicate invoices, missing math errors, or approving fraudulent-looking submissions simply because no one caught them in time. Larger enterprises solve this with expensive accounts-payable automation software; most small businesses cannot justify that cost, and end up with no automation at all.
 
 The Approach: A Multi-Agent Pipeline
