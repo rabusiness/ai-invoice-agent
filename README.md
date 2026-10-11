@@ -37,4 +37,4 @@ Three agents work in sequence:
 - Handling of scanned or low-quality images
  
 ## Architecture
-![Architecture diagram](docs/architecture-diagram.png)
+docs/Agent Architecture n8n.pdf
