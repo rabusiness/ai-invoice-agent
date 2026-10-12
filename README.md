@@ -34,13 +34,6 @@ The following three agents work in sequence:
 - Email or Slack notifications for escalated invoices
 - Handling of scanned or low-quality images
  
-## Architecture
-<<<<<<< HEAD
-![Architecture diagram](docs/Agent Architecture n8n.pdf)
-=======
-docs/Agent Architecture n8n.pdf
-
-
 ## The Problem
 Small and medium-sized businesses process invoices largely by hand: someone opens each PDF, reads the vendor and amount, checks it against what was actually ordered, and decides whether to pay it. This is slow, error-prone, and does not scale — a growing business either hires more people to do this same manual work, or starts making mistakes: paying duplicate invoices, missing math errors, or approving fraudulent-looking submissions simply because no one caught them in time. Larger enterprises solve this with expensive accounts-payable automation software; most small businesses cannot justify that cost, and end up with no automation at all.
 
@@ -52,4 +45,3 @@ Agent 1 — Document Processing. Reads an uploaded invoice PDF directly using a 
 Agent 2 — The Completeness Gate. Checks five hard requirements: is the vendor present, is the invoice number present, is the total valid, does the line-item math reconcile with the total, and is this a duplicate of a known invoice. Any single failure here is disqualifying — the invoice is rejected outright, with no further evaluation. This stage exists because certain problems are not "somewhat risky"; they mean the invoice cannot be processed at all until a human corrects it.
 
 Agent 3 — Confidence Scoring & Decision. Runs only for invoices that have already passed the gate, and checks softer, genuinely uncertain signals: a first-time vendor, a suspiciously round total, a very small rounding discrepancy, or an unusual invoice date. None of these disqualify an invoice on their own — they simply indicate whether a quick human glance is warranted. Invoices scoring 95 or above are auto-approved; anything below is escalated for review.
->>>>>>> 1eb8292d09da74f1d8ec01539a1b2c0e5899b4fb
