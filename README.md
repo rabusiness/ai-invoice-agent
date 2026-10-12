@@ -1,5 +1,3 @@
-# ai-invoice-agent
-# print("Hello")
 # AI Invoice Review Agent
  
 An AI-powered, multi-agent system that reads invoice PDFs, checks them
