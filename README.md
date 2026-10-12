@@ -17,6 +17,7 @@ The following three agents work in sequence:
    score. 95+ is auto-approved; anything lower is escalated.
  
 ## Tech stack
+![n8n Workflow Architecture](docs/architecture-diagram.png)
 - n8n (workflow orchestration)
 - Google Gemini 3.5 Flash-Lite (multimodal PDF reading)
 - Streamlit (frontend)
