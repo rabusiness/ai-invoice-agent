@@ -3,8 +3,8 @@
 An AI-powered, multi-agent system that reads invoice PDFs, checks them
 for problems, and decides whether to approve, escalate, or reject them.
  
-## Demo Video
-
+## Demo Presentation
+https://docs.google.com/presentation/d/1BymKKCWFx1AScMBL4kKK8oXOpTskMDRxrZwNQKzWF0I/edit?usp=sharing
  
 ## How it works
 The following three agents work in sequence:
