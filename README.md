@@ -9,7 +9,7 @@ for problems, and decides whether to approve, escalate, or reject them.
 
  
 ## How it works
-Three agents work in sequence:
+The following three agents work in sequence:
 1. Document Processing Agent — reads the uploaded invoice PDF directly
    (Gemini 3.5 Flash-Lite) and extracts structured fields.
 2. Completeness Gate (Tier 1) — checks five hard requirements. Any
@@ -37,4 +37,4 @@ Three agents work in sequence:
 - Handling of scanned or low-quality images
  
 ## Architecture
-![Architecture diagram](docs/architecture-diagram.png)
+![Architecture diagram](docs/Agent Architecture n8n.pdf)
